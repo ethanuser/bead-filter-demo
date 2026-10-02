@@ -6,8 +6,10 @@ A 3D-printable, scaled-up demo of the AxisMED membrane-based bacteria capture de
 |---|---|
 | Coarse grid, 4.5 mm slots | Layer 1 coarse debris filter, ~2–5 µm |
 | Fine grid, 2 mm slots | Layer 2 bacterial capture membrane, 0.22–0.4 µm |
-| 6 mm beads | Lysed cell debris and aggregates |
+| 6, 7 and 8 mm beads | Lysed cell debris and aggregates of different sizes |
 | 3 mm beads | Bacteria |
+
+7 and 8 mm beads are too big for the 7 mm inlet, so they go into the top chamber before the cover is taped on. 6 mm and 3 mm beads are loaded through the inlet.
 
 **Live simulation:** https://ethanuser.github.io/bead-filter-demo/
 

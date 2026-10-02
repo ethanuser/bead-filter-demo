@@ -5,12 +5,16 @@
 
   // Device geometry (mirrors the Onshape variables) used for chamber bookkeeping.
   const DEV = {
-    cavity: { x: 25, yFront: -13, yBack: -3 },
+    cavity: { x: 25, yFront: -13, yBack: -3, zBottom: 6, zTop: 87 },
     fineShelf: [26, 29],    // #wall + #hBot .. + #gridT
     coarseShelf: [54, 57],  // + #hMid .. + #gridT
     top: 93,
     inlet: { x: 0, y: -8 },
   };
+
+  // Bead diameters in mm: three debris sizes and the bacteria analog.
+  const SIZES = [8, 7, 6, 3];
+  const sizeIndex = (r) => SIZES.indexOf(Math.round(2 * r));
 
   const G_EFF = 9810 * (1 - 1.0 / 2.5); // glass beads in water (buoyancy-reduced)
   const CELL = 4;
@@ -112,10 +116,15 @@
       this.flow = 60;
     }
 
-    // Interleave large and small beads in a random order and feed them through the inlet.
-    pour(nLarge, nSmall, seed = 7) {
+    _seed(seed) {
       let s = seed;
-      const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      this._rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+      return this._rnd;
+    }
+
+    // Interleave 6 mm and 3 mm beads in a random order and feed them through the inlet.
+    pour(nLarge, nSmall, seed = 7) {
+      const rnd = this._seed(seed);
       const list = [];
       for (let i = 0; i < nLarge; i++) list.push(3);
       for (let i = 0; i < nSmall; i++) list.push(1.5);
@@ -124,7 +133,27 @@
         [list[i], list[j]] = [list[j], list[i]];
       }
       this.queue.push(...list);
-      this._rnd = rnd;
+    }
+
+    // Beads too big for the 7 mm inlet (e.g. {8: 4, 7: 5}) are placed straight into the
+    // top chamber, as if dropped in before the cover is taped on.
+    preload(counts, seed = 3) {
+      const rnd = this._seed(seed);
+      const c = DEV.cavity;
+      for (const [d, n] of Object.entries(counts)) {
+        const r = d / 2;
+        for (let i = 0; i < n; i++) {
+          for (let tries = 0; tries < 300; tries++) {
+            const x = (rnd() * 2 - 1) * (c.x - r);
+            const y = c.yFront + r + rnd() * (c.yBack - c.yFront - 2 * r);
+            const z = DEV.coarseShelf[1] + r + 1 + rnd() * (DEV.top - 6 - DEV.coarseShelf[1] - 2 * r - 1);
+            if (this.beads.every((b) => (b.x - x) ** 2 + (b.y - y) ** 2 + (b.z - z) ** 2 > (b.r + r + 0.2) ** 2)) {
+              this.beads.push({ r, x, y, z, vx: 0, vy: 0, vz: 0, px: x, py: y, pz: z });
+              break;
+            }
+          }
+        }
+      }
     }
 
     shake(seconds = 2.5) { this.shakeUntil = this.t + seconds; }
@@ -171,7 +200,7 @@
       // Integrate: gravity + linear drag toward the local liquid velocity.
       // While rinsing, liquid moves down through the cavity at `this.flow` mm/s.
       for (const b of beads) {
-        const k = b.r > 2 ? 22 : 34;
+        const k = b.r < 2 ? 34 : (22 * 3) / b.r; // drag per unit mass falls with size
         const uz = this.rinsing && b.z - off[2] < DEV.top ? -this.flow : 0;
         b.vz -= G_EFF * dt;
         const damp = 1 / (1 + k * dt);
@@ -230,8 +259,17 @@
           }
         }
       }
-      // Feed tube above the inlet (the suppressed nipple), bore radius 3.5 mm.
-      if (b.z - off[2] > DEV.top) {
+      // Hard limits: the cavity is a box, so a bead shoved hard by the pile can never end up
+      // inside the side or back walls, where the surface contacts would push it the wrong way.
+      const cav = DEV.cavity, lz = b.z - off[2];
+      if (lz >= cav.zBottom && lz <= cav.zTop) {
+        const lx = b.x - off[0], ly = b.y - off[1];
+        const cx = Math.max(-cav.x + b.r, Math.min(cav.x - b.r, lx));
+        const cy = Math.max(cav.yFront + b.r, Math.min(cav.yBack - b.r, ly));
+        b.x = off[0] + cx; b.y = off[1] + cy;
+      }
+      // Inlet bore and the feed tube above it (the suppressed nipple), radius 3.5 mm.
+      if (lz > cav.zTop) {
         const rx = b.x - off[0] - DEV.inlet.x, ry = b.y - off[1] - DEV.inlet.y;
         const rad = Math.hypot(rx, ry), lim = 3.5 - b.r;
         if (rad > lim && rad > 1e-9) {
@@ -253,11 +291,12 @@
       }
     }
 
-    // Where each bead ended up, in device coordinates.
+    // Where each bead ended up, in device coordinates; counts are indexed like SIZES.
     census() {
-      const c = { top: [0, 0], mid: [0, 0], res: [0, 0], feed: [0, 0], lost: [0, 0] };
+      const zero = () => SIZES.map(() => 0);
+      const c = { top: zero(), mid: zero(), res: zero(), feed: zero(), lost: zero() };
       for (const b of this.beads) {
-        const k = b.r > 2 ? 0 : 1;
+        const k = sizeIndex(b.r);
         const z = b.z - this.offset[2], x = b.x - this.offset[0], y = b.y - this.offset[1];
         const inside = Math.abs(x) < 31 && y > -13.5 && y < 0.5;
         if (z < 0 || !inside) c.lost[k]++;
@@ -278,7 +317,7 @@
     }
   }
 
-  const api = { Sim, DEV, parseSTL };
+  const api = { Sim, DEV, SIZES, parseSTL };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.BeadSim = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
