@@ -19,9 +19,9 @@
   --muted: #5b6b6c;
   --rule: #cdd7d6;
   --violet: #6a3ba8;      /* crystal violet: 3 mm "bacteria" beads */
-  --debris: #a8722f;      /* 6 mm "debris" beads */
-  --debris-7: #87511f;    /* 7 mm */
-  --debris-8: #643716;    /* 8 mm */
+  --debris: #b67c33;      /* 6 mm "debris" beads */
+  --debris-7: #985d27;    /* 7 mm */
+  --debris-8: #7a4520;    /* 8 mm */
   --ok: #2c7a58;
   --warn: #b0482f;
   --focus: #6a3ba8;
@@ -751,6 +751,7 @@ td.stray { color: var(--warn); }
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 const { Sim, DEV, parseSTL } = window.BeadSim;
 const N6 = 10, N_SMALL = 45;
@@ -767,7 +768,7 @@ const tok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n
 const $ = (id) => document.getElementById(id);
 
 // ---------- scene
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 stage.prepend(renderer.domElement);
 $("loadMsg").remove();
@@ -785,8 +786,10 @@ controls.minDistance = 90;
 controls.maxDistance = 600;
 controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9696, 1.6));
-const key = new THREE.DirectionalLight(0xffffff, 1.5);
+// A soft studio environment gives the acrylic something to reflect and the black PLA a sheen.
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9696, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(-80, -160, 220);
 scene.add(key);
 const rim = new THREE.DirectionalLight(0xffffff, 0.5);
@@ -806,18 +809,31 @@ const geomFrom = (tri) => {
   g.computeVertexNormals();
   return g;
 };
-const edgeMat = new THREE.LineBasicMaterial({ color: 0x334040, transparent: true, opacity: 0.35 });
+// Black PLA body; light edge lines keep its outline readable on a dark background.
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x8d9898, transparent: true, opacity: 0.45 });
 const bodyGeo = geomFrom(sim.tri);
-device.add(new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0xe6e9e4, roughness: 0.85, flatShading: true })));
+device.add(new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({
+  color: 0x1a1b1d, roughness: 0.5, metalness: 0, envMapIntensity: 0.7, flatShading: true,
+})));
 device.add(new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeo, 25), edgeMat));
 
 const panelGeo = geomFrom(parseSTL(b64(window.PANEL_B64)));
 const panel = new THREE.Group();
-panel.add(new THREE.Mesh(panelGeo, new THREE.MeshPhysicalMaterial({
-  color: 0xcfe7f3, transparent: true, opacity: 0.16, roughness: 0.05, depthWrite: false,
+// Clear acrylic in two layers: a faint tint so the sheet reads as present, plus a reflection-only
+// layer (black base, glossy acrylic Fresnel) added on top. Looking straight through, it reflects a
+// little; at glancing angles it turns mirror-like, as real acrylic does.
+panel.add(new THREE.Mesh(panelGeo, new THREE.MeshBasicMaterial({
+  color: 0xd8ecf5, transparent: true, opacity: 0.06, depthWrite: false,
 })));
+const reflect = new THREE.Mesh(panelGeo, new THREE.MeshPhysicalMaterial({
+  color: 0x000000, metalness: 0, roughness: 0.03, ior: 1.49, specularIntensity: 1,
+  envMapIntensity: 1.6,
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+}));
+reflect.renderOrder = 2;
+panel.add(reflect);
 panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(panelGeo, 25),
-  new THREE.LineBasicMaterial({ color: 0x5e8aa0, transparent: true, opacity: 0.55 })));
+  new THREE.LineBasicMaterial({ color: 0xcfe3ee, transparent: true, opacity: 0.6 })));
 device.add(panel);
 
 // Feed tube standing in for the suppressed inlet nipple
@@ -836,8 +852,8 @@ device.add(liquid);
 
 // Beads, drawn in world space
 const sphere = new THREE.SphereGeometry(1, 22, 16);
-const largeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05 });
-const smallMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05 });
+const largeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05, envMapIntensity: 0.2 });
+const smallMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05, envMapIntensity: 0.2 });
 const debrisColors = { 8: new THREE.Color(), 7: new THREE.Color(), 6: new THREE.Color() };
 const MAXL = 160, MAXS = 400;
 const largeIM = new THREE.InstancedMesh(sphere, largeMat, MAXL);
@@ -857,12 +873,13 @@ const tags = [
   return { el, v: new THREE.Vector3(33, -13, t.z) };
 });
 
+scene.background = new THREE.Color();
 function applyTheme() {
+  scene.background.set(tok("--stage"));
   debrisColors[6].set(tok("--debris"));
   debrisColors[7].set(tok("--debris-7"));
   debrisColors[8].set(tok("--debris-8"));
   smallMat.color.set(tok("--violet"));
-  edgeMat.color.set(tok("--ink"));
 }
 applyTheme();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
