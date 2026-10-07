@@ -8,6 +8,9 @@
     cavity: { x: 25, yFront: -13, yBack: -3, zBottom: 6, zTop: 87 },
     fineShelf: [26, 29],    // #wall + #hBot .. + #gridT
     coarseShelf: [54, 57],  // + #hMid .. + #gridT
+    // Slot widths (#fineGap, #coarseGap): a bead wider than a grid's slots can never have
+    // its centre inside that grid's band, however hard the pile pushes.
+    grids: [{ z: [26, 29], gap: 2 }, { z: [54, 57], gap: 4.5 }],
     top: 93,
     inlet: { x: 0, y: -8 },
   };
@@ -15,6 +18,11 @@
   // Bead diameters in mm: three debris sizes and the bacteria analog.
   const SIZES = [8, 7, 6, 3];
   const sizeIndex = (r) => SIZES.indexOf(Math.round(2 * r));
+
+  const SLEEP_R = 0.35;  // mm: a bead that stays this close to one spot...
+  const SLEEP_T = 0.4;   // ...for this many seconds goes to sleep (even if wedged and twitching)
+  const WAKE_V = 40;     // mm/s: a neighbour moving faster than this wakes a sleeping bead
+  const FEED_LEN = 22;   // mm of feed tube above the inlet
 
   const G_EFF = 9810 * (1 - 1.0 / 2.5); // glass beads in water (buoyancy-reduced)
   const CELL = 4;
@@ -114,7 +122,28 @@
       this._cp = new Float64Array(3);
       this.rinsing = false;
       this.flow = 60;
+      // Device orientation, in device coordinates: gravity direction, angular velocity and
+      // angular acceleration (rad/s, rad/s^2) about `pivot`. Upright and still by default.
+      this.gDir = [0, 0, -1];
+      this.omega = [0, 0, 0];
+      this.alpha = [0, 0, 0];
+      this.pivot = [0, -9.25, 46.5];
+      this.agitation = 0;   // 0..1 vibration level, e.g. from rotating the device by hand
+      this.lostTally = SIZES.map(() => 0);
     }
+
+    // Orientation update from the viewer: gravity direction plus how fast the device turns.
+    setFrame(gDir, omega, alpha) {
+      this.gDir = gDir; this.omega = omega; this.alpha = alpha;
+      if (Math.hypot(...omega) > 0.05) this.wakeAll();
+    }
+
+    agitate(level) {
+      this.agitation = Math.max(this.agitation, Math.min(1, level));
+      if (this.agitation > 0.02) this.wakeAll();
+    }
+
+    wakeAll() { for (const b of this.beads) { b.asleep = false; b.still = 0; b.anchor = null; } }
 
     _seed(seed) {
       let s = seed;
@@ -158,17 +187,22 @@
 
     shake(seconds = 2.5) { this.shakeUntil = this.t + seconds; }
 
-    rinse(on) { this.rinsing = on; }
+    rinse(on) { this.rinsing = on; this.wakeAll(); }
 
-    reset() { this.beads = []; this.queue = []; this.shakeUntil = -1; this.offset = [0, 0, 0]; }
+    reset() {
+      this.beads = []; this.queue = []; this.shakeUntil = -1; this.offset = [0, 0, 0];
+      this.agitation = 0; this.lostTally = SIZES.map(() => 0);
+    }
 
     get shaking() { return this.t < this.shakeUntil; }
 
     _deviceOffset(t) {
-      if (t >= this.shakeUntil) return [0, 0, 0];
+      const level = t < this.shakeUntil ? 1 : this.agitation;
+      if (level < 1e-3) return [0, 0, 0];
       const w = 2 * Math.PI * 9;
       // Hand-shake: side-to-side, front-to-back and vertical taps at offset rates.
-      return [1.6 * Math.sin(w * t), 0.9 * Math.sin(0.73 * w * t + 1.1), 1.2 * Math.sin(1.37 * w * t + 0.6)];
+      return [1.6 * level * Math.sin(w * t), 0.9 * level * Math.sin(0.73 * w * t + 1.1),
+        1.2 * level * Math.sin(1.37 * w * t + 0.6)];
     }
 
     _trySpawn() {
@@ -194,19 +228,37 @@
       this.t += dt;
       this.spawnGap -= dt;
       if (this.spawnGap <= 0) { this._trySpawn(); this.spawnGap = 0.09; }
+      this.agitation *= Math.exp(-dt / 0.25);
       const off = (this.offset = this._deviceOffset(this.t));
       const beads = this.beads;
+      if (this.shaking || this.agitation > 0.02) this.wakeAll();
 
-      // Integrate: gravity + linear drag toward the local liquid velocity.
-      // While rinsing, liquid moves down through the cavity at `this.flow` mm/s.
+      // Integrate awake beads: gravity (in device coordinates), the inertial forces of a
+      // turning device, and linear drag toward the local liquid velocity. While rinsing,
+      // liquid moves through the cavity toward the outlet at `this.flow` mm/s.
+      const [gx, gy, gz] = this.gDir, [wx, wy, wz] = this.omega, [ax, ay, az] = this.alpha;
+      const turning = wx || wy || wz || ax || ay || az;
       for (const b of beads) {
+        b.px = b.x; b.py = b.y; b.pz = b.z;
+        if (b.asleep) continue;
+        let fx = gx * G_EFF, fy = gy * G_EFF, fz = gz * G_EFF;
+        if (turning) {
+          const rx = b.x - off[0] - this.pivot[0], ry = b.y - off[1] - this.pivot[1], rz = b.z - off[2] - this.pivot[2];
+          // -(alpha x r) - omega x (omega x r) - 2 omega x v
+          const cx = wy * rz - wz * ry, cy = wz * rx - wx * rz, cz = wx * ry - wy * rx;
+          let ix = -(ay * rz - az * ry) - (wy * cz - wz * cy) - 2 * (wy * b.vz - wz * b.vy);
+          let iy = -(az * rx - ax * rz) - (wz * cx - wx * cz) - 2 * (wz * b.vx - wx * b.vz);
+          let iz = -(ax * ry - ay * rx) - (wx * cy - wy * cx) - 2 * (wx * b.vy - wy * b.vx);
+          const im = Math.hypot(ix, iy, iz), cap = 3 * 9810;
+          if (im > cap) { ix *= cap / im; iy *= cap / im; iz *= cap / im; }
+          fx += ix; fy += iy; fz += iz;
+        }
         const k = b.r < 2 ? 34 : (22 * 3) / b.r; // drag per unit mass falls with size
         const uz = this.rinsing && b.z - off[2] < DEV.top ? -this.flow : 0;
-        b.vz -= G_EFF * dt;
         const damp = 1 / (1 + k * dt);
-        b.vx *= damp; b.vy *= damp;
-        b.vz = (b.vz + k * dt * uz) * damp;
-        b.px = b.x; b.py = b.y; b.pz = b.z;
+        b.vx = (b.vx + fx * dt) * damp;
+        b.vy = (b.vy + fy * dt) * damp;
+        b.vz = (b.vz + fz * dt + k * dt * uz) * damp;
         b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
       }
 
@@ -225,12 +277,21 @@
         const a = beads[i];
         for (let j = i + 1; j < beads.length; j++) {
           const b = beads[j];
+          if (a.asleep && b.asleep) continue;
           const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
           const rr = a.r + b.r;
           const d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 >= rr * rr || d2 < 1e-12) continue;
+          if (d2 >= (rr + 0.3) ** 2 || d2 < 1e-12) continue;
+          // A moving bead touching (or just leaving) a sleeper wakes it, so a pile never
+          // hangs in the air when the bead underneath rolls away.
+          if (a.asleep !== b.asleep) {
+            const w = a.asleep ? b : a, s = a.asleep ? a : b;
+            if (Math.hypot(w.vx, w.vy, w.vz) > WAKE_V) { s.asleep = false; s.still = 0; }
+          }
+          if (d2 >= rr * rr) continue;
           const d = Math.sqrt(d2), pen = rr - d;
-          const ma = a.r ** 3, mb = b.r ** 3, wa = mb / (ma + mb), wb = ma / (ma + mb);
+          const ma = a.asleep ? Infinity : a.r ** 3, mb = b.asleep ? Infinity : b.r ** 3;
+          const wa = ma === Infinity ? 0 : mb === Infinity ? 1 : mb / (ma + mb), wb = 1 - wa;
           const nx = dx / d, ny = dy / d, nz = dz / d;
           a.x -= nx * pen * wa; a.y -= ny * pen * wa; a.z -= nz * pen * wa;
           b.x += nx * pen * wb; b.y += ny * pen * wb; b.z += nz * pen * wb;
@@ -240,6 +301,7 @@
 
     // Bead-wall contacts in the device's (possibly shaking) frame.
     _walls(b, off, friction) {
+      if (b.asleep) return;
       const cp = this._cp, tri = this.tri;
       const list = cellTris(this.grid, b.x - off[0], b.y - off[1], b.z - off[2]);
       if (list) {
@@ -268,33 +330,92 @@
         const cy = Math.max(cav.yFront + b.r, Math.min(cav.yBack - b.r, ly));
         b.x = off[0] + cx; b.y = off[1] + cy;
       }
-      // Inlet bore and the feed tube above it (the suppressed nipple), radius 3.5 mm.
-      if (lz > cav.zTop) {
+      // Inlet and outlet bores, plus the capped feed tube above the inlet (the suppressed
+      // nipple): radius 3.5 mm. Tilting the device can send beads back up into the tube.
+      if (lz > cav.zTop || (lz < cav.zBottom && lz > 0)) {
         const rx = b.x - off[0] - DEV.inlet.x, ry = b.y - off[1] - DEV.inlet.y;
-        const rad = Math.hypot(rx, ry), lim = 3.5 - b.r;
+        const rad = Math.hypot(rx, ry), lim = Math.max(0, 3.5 - b.r);
         if (rad > lim && rad > 1e-9) {
           b.x = off[0] + DEV.inlet.x + (rx * lim) / rad;
           b.y = off[1] + DEV.inlet.y + (ry * lim) / rad;
         }
+        const cap = DEV.top + FEED_LEN - b.r;
+        if (lz > cap) b.z = off[2] + cap;
       }
-      // Clear front panel (suppressed in CAD, modelled here as the y = -13 plane).
+      // Grid guard (see DEV.grids): keep the bead on the side it came from.
+      for (const g of DEV.grids) {
+        if (b.r <= g.gap / 2) continue;
+        const h = Math.sqrt(b.r * b.r - (g.gap / 2) ** 2);
+        const lo = g.z[0] - h, hi = g.z[1] + h, z = b.z - off[2];
+        if (z > lo && z < hi) b.z = off[2] + (b.pz - off[2] >= (g.z[0] + g.z[1]) / 2 ? hi : lo);
+      }
+      // Clear panel's inner face: the y = -13 plane.
       const panel = DEV.cavity.yFront + off[1];
       if (b.z - off[2] < DEV.top && b.y - b.r < panel) b.y = panel + b.r;
     }
 
     _finish(dt) {
-      // Derive velocities, cap runaway speeds.
+      // Derive velocities and cap runaway speeds. A bead that has stayed within SLEEP_R of
+      // one spot for SLEEP_T seconds goes to sleep: it stays put (no resting jitter) until
+      // disturbed. Using drift rather than speed also catches beads twitching in place.
+      const calm = !this.shaking && this.agitation <= 0.02 && !Math.hypot(...this.omega);
       for (const b of this.beads) {
+        if (b.asleep) { b.vx = b.vy = b.vz = 0; continue; }
         b.vx = (b.x - b.px) / dt; b.vy = (b.y - b.py) / dt; b.vz = (b.z - b.pz) / dt;
+      }
+      this._contactDamping();
+      for (const b of this.beads) {
+        if (b.asleep) continue;
         const v2 = b.vx * b.vx + b.vy * b.vy + b.vz * b.vz;
         if (v2 > 1500 * 1500) { const k = 1500 / Math.sqrt(v2); b.vx *= k; b.vy *= k; b.vz *= k; }
+        const a = b.anchor;
+        if (calm && a && (b.x - a[0]) ** 2 + (b.y - a[1]) ** 2 + (b.z - a[2]) ** 2 < SLEEP_R * SLEEP_R) {
+          b.still = (b.still || 0) + dt;
+        } else {
+          b.anchor = [b.x, b.y, b.z]; b.still = 0;
+        }
+        if (b.still > SLEEP_T) { b.asleep = true; b.vx = b.vy = b.vz = 0; }
+      }
+      // Beads that fall out of the outlet leave the simulation (counted as lost).
+      const off = this.offset;
+      this.beads = this.beads.filter((b) => {
+        if (b.z - off[2] > -30) return true;
+        this.lostTally[sizeIndex(b.r)]++;
+        return false;
+      });
+    }
+
+    // Touching beads lose the speed at which they approach each other (no bounce) and a
+    // little of their sliding speed (rolling friction). This is what stops piles of large
+    // beads from jiggling instead of settling.
+    _contactDamping() {
+      const beads = this.beads;
+      for (let i = 0; i < beads.length; i++) {
+        const a = beads[i];
+        for (let j = i + 1; j < beads.length; j++) {
+          const b = beads[j];
+          if (a.asleep && b.asleep) continue;
+          const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, rr = a.r + b.r + 0.02;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= rr * rr || d2 < 1e-12) continue;
+          const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, nz = dz / d;
+          const ma = a.r ** 3, mb = b.r ** 3;
+          const wa = a.asleep ? 0 : b.asleep ? 1 : mb / (ma + mb), wb = b.asleep ? 0 : 1 - wa;
+          const rx = b.vx - a.vx, ry = b.vy - a.vy, rz = b.vz - a.vz;
+          const vn = rx * nx + ry * ny + rz * nz;
+          const tx = rx - vn * nx, ty = ry - vn * ny, tz = rz - vn * nz;
+          const ix = (vn < 0 ? vn * nx : 0) + 0.08 * tx, iy = (vn < 0 ? vn * ny : 0) + 0.08 * ty,
+            iz = (vn < 0 ? vn * nz : 0) + 0.08 * tz;
+          a.vx += ix * wa; a.vy += iy * wa; a.vz += iz * wa;
+          b.vx -= ix * wb; b.vy -= iy * wb; b.vz -= iz * wb;
+        }
       }
     }
 
     // Where each bead ended up, in device coordinates; counts are indexed like SIZES.
     census() {
       const zero = () => SIZES.map(() => 0);
-      const c = { top: zero(), mid: zero(), res: zero(), feed: zero(), lost: zero() };
+      const c = { top: zero(), mid: zero(), res: zero(), feed: zero(), lost: [...this.lostTally] };
       for (const b of this.beads) {
         const k = sizeIndex(b.r);
         const z = b.z - this.offset[2], x = b.x - this.offset[0], y = b.y - this.offset[1];

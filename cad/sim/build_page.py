@@ -11,9 +11,11 @@ HERE = Path(__file__).parent
 ROOT = HERE.parent.parent
 src = (HERE / "page.src.html").read_text()
 core = (HERE / "sim_core.js").read_text()
-stl = base64.b64encode((HERE.parent / "exports" / "filter_body.stl").read_bytes()).decode()
+exports = HERE.parent / "exports"
+stl = base64.b64encode((exports / "filter_body.stl").read_bytes()).decode()
+panel = base64.b64encode((exports / "clear_panel.stl").read_bytes()).decode()
 
-out = src.replace("/*SIM_CORE*/", core).replace("__STL_B64__", stl)
+out = src.replace("/*SIM_CORE*/", core).replace("__STL_B64__", stl).replace("__PANEL_B64__", panel)
 (HERE / "bead_filter_bench.html").write_text(out)
 
 # GitHub Pages needs a complete document: head tags before the first <div>, the rest in <body>.
@@ -21,8 +23,8 @@ split = out.index('<div class="wrap">')
 page = (
     '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
     '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-    '<meta name="description" content="Live physics simulation of 6 mm and 3 mm beads separating '
-    'through the coarse and fine grates of the AxisMED bead filter demo.">\n'
+    '<meta name="description" content="Live physics simulation of 6-8 mm debris beads and 3 mm '
+    'bacteria beads separating through the coarse and fine grates of the AxisMED bead filter demo.">\n'
     "<style>body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>\n"
     + out[:split]
     + "</head>\n<body>\n"

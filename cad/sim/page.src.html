@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
 <style>
-/* Layout: a bench instrument. Live 3D stage on the left, a read-out column on the right; stacks on phones. */
+/* Layout: a bench instrument. Live 3D stage with its own control bar on the left, a compact read-out column on the right; stacks on phones. Longer explanations live in (i) tooltips. */
 :root {
   --bg: #eaefee;
   --stage: #f6f8f7;
@@ -18,6 +18,7 @@
   --ok: #2c7a58;
   --warn: #b0482f;
   --focus: #6a3ba8;
+  --shadow: rgb(20 32 33 / 0.14);
   --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
   --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -28,13 +29,15 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0e1414; --stage: #131b1b; --surface: #172121; --ink: #e1eaea; --muted: #93a5a5;
-    --rule: #2a3a3a; --violet: #a585e6; --debris: #d39b55; --debris-7: #b97a3b; --debris-8: #9a5f2c; --ok: #5cc198; --warn: #e3826a; --focus: #a585e6;
+    --rule: #2a3a3a; --violet: #a585e6; --debris: #d39b55; --debris-7: #b97a3b; --debris-8: #9a5f2c;
+    --ok: #5cc198; --warn: #e3826a; --focus: #a585e6; --shadow: rgb(0 0 0 / 0.45);
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e1414; --stage: #131b1b; --surface: #172121; --ink: #e1eaea; --muted: #93a5a5;
-  --rule: #2a3a3a; --violet: #a585e6; --debris: #d39b55; --debris-7: #b97a3b; --debris-8: #9a5f2c; --ok: #5cc198; --warn: #e3826a; --focus: #a585e6;
+  --rule: #2a3a3a; --violet: #a585e6; --debris: #d39b55; --debris-7: #b97a3b; --debris-8: #9a5f2c;
+  --ok: #5cc198; --warn: #e3826a; --focus: #a585e6; --shadow: rgb(0 0 0 / 0.45);
   color-scheme: dark;
 }
 
@@ -44,185 +47,248 @@ body {
   font: 400 var(--step-0)/1.5 var(--font-body);
   padding-inline: 16px; padding-block: 20px 28px;
 }
-.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 16px; }
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 14px; }
 
-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 24px; }
-h1 { font: 600 var(--step-2)/1.15 var(--font-display); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
-header p { margin: 0; color: var(--muted); max-width: 62ch; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 24px; }
+.title { display: flex; align-items: center; gap: 8px; }
+h1 { font: 600 var(--step-2)/1.15 var(--font-display); letter-spacing: 0.01em; margin: 0; }
+.hint { margin: 0; color: var(--muted); font: 400 12px/1.3 var(--font-mono); }
 
-.bench { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
 @media (max-width: 860px) { .bench { grid-template-columns: minmax(0, 1fr); } }
 
 .stage {
   position: relative; background: var(--stage); border: 1px solid var(--rule); border-radius: 6px;
-  height: min(78vh, 760px); min-height: 460px; overflow: hidden;
+  height: min(78vh, 760px); min-height: 460px; overflow: hidden; user-select: none; -webkit-user-select: none;
 }
-@media (max-width: 860px) { .stage { height: 64vh; min-height: 420px; } }
-.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+@media (max-width: 860px) { .stage { height: 66vh; min-height: 420px; } }
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.stage canvas.dragging { cursor: grabbing; }
 .tag {
   position: absolute; left: 0; top: 0; pointer-events: none; white-space: nowrap;
   font: 500 11px/1.2 var(--font-mono); color: var(--muted); letter-spacing: 0.02em;
-  transform: translate(0, -50%);
 }
 .tag b { color: var(--ink); font-weight: 500; }
 .tag::before { content: ""; display: inline-block; width: 14px; height: 1px; background: var(--rule); vertical-align: middle; margin-right: 6px; }
-.stage-note {
-  position: absolute; left: 12px; bottom: 10px; font: 400 11px/1.3 var(--font-mono); color: var(--muted);
-}
 .load-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font: 500 var(--step-0) var(--font-mono); }
 
+.toolbar {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px;
+  align-items: center; justify-content: space-between; pointer-events: none;
+}
+.toolbar > * { pointer-events: auto; }
+.toolbar .group { display: flex; flex-wrap: wrap; gap: 6px; }
+
+button {
+  font: 500 var(--step-0)/1 var(--font-body); color: var(--ink); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 5px; padding: 8px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); min-width: 5.5em; }
+button:disabled { opacity: 0.45; cursor: default; }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; border-radius: 0; padding: 7px 9px; font-family: var(--font-mono); font-size: 12px; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+
 aside { display: grid; gap: 12px; min-width: 0; }
-.block { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 14px 12px; display: grid; gap: 10px; min-width: 0; }
+.block { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; display: grid; gap: 10px; min-width: 0; }
 .label {
   font: 600 11px/1 var(--font-display); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted);
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 6px;
 }
+.label .end { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
-/* Process steps (a real sequence, so they are numbered) */
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: s; }
-.steps li {
-  counter-increment: s; font: 500 12px/1.2 var(--font-display); color: var(--muted);
-  border-top: 3px solid var(--rule); padding-top: 6px;
+/* Info tooltips: hover or focus the (i); long text scrolls inside the tip. */
+.info { position: relative; display: inline-flex; }
+.info > button {
+  width: 18px; height: 18px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  font: 600 11px/1 var(--font-mono); color: var(--muted); background: transparent; cursor: help;
 }
+.tip {
+  display: none; position: absolute; top: 100%; right: -8px; padding-top: 6px; z-index: 30;
+  width: min(330px, calc(100vw - 32px));
+}
+.tip.from-left { right: auto; left: -8px; }
+.info:hover .tip, .info:focus-within .tip, .info.open .tip { display: block; }
+.tip-body {
+  max-height: min(340px, 60vh); overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; box-shadow: 0 10px 28px var(--shadow);
+  padding: 12px 14px; color: var(--ink); font: 400 13px/1.5 var(--font-body);
+  text-transform: none; letter-spacing: normal; display: grid; gap: 8px;
+}
+.tip-body p, .tip-body ul, .tip-body dl { margin: 0; }
+.tip-body ul { padding-left: 18px; display: grid; gap: 4px; }
+.tip-body h3 { margin: 4px 0 0; font: 600 11px/1.2 var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.tip-body dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 5px 10px; }
+.tip-body dt { font: 500 12px/1.4 var(--font-mono); white-space: nowrap; }
+.tip-body dd { margin: 0; color: var(--muted); }
+kbd { font: 500 11px/1 var(--font-mono); border: 1px solid var(--rule); border-radius: 3px; padding: 1px 4px; }
+
+/* Run steps (a real sequence, so they are numbered) */
+.steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: s; }
+.steps li { counter-increment: s; font: 500 12px/1.2 var(--font-display); color: var(--muted); border-top: 3px solid var(--rule); padding-top: 6px; }
 .steps li::before { content: counter(s) " "; font-family: var(--font-mono); font-size: 11px; }
 .steps li.done { color: var(--ink); border-color: color-mix(in srgb, var(--ok) 55%, var(--rule)); }
 .steps li.now { color: var(--ink); border-color: var(--violet); }
-.phase-line { margin: 0; color: var(--muted); min-height: 2.9em; }
 
-/* Read-out table */
-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { text-align: right; padding: 6px 0 6px 8px; border-bottom: 1px solid var(--rule); }
-th:first-child, td:first-child { text-align: left; padding-left: 0; }
-thead th { font: 600 11px/1.2 var(--font-display); color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
-tbody td { font: 500 var(--step-1)/1.2 var(--font-mono); }
-tbody td:first-child { font: 400 var(--step-0)/1.25 var(--font-body); }
-tbody td:first-child small { display: block; color: var(--muted); font-size: 11px; }
-tbody tr:last-child td { border-bottom: 0; }
-td.expect { color: var(--ink); }
-td.zero { color: var(--muted); }
-td.stray { color: var(--warn); }
-.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: 1px; margin-right: 5px; }
-.dot.d6 { background: var(--debris); }
-.dot.d7 { background: var(--debris-7); width: 10px; height: 10px; vertical-align: 0; }
-.dot.d8 { background: var(--debris-8); width: 11px; height: 11px; vertical-align: -1px; }
-.dot.s { background: var(--violet); width: 6px; height: 6px; vertical-align: 2px; }
-
-.pill { font: 600 11px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
+.pill { font: 600 11px/1 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); white-space: nowrap; }
 .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .pill.mixed { color: var(--debris); border-color: color-mix(in srgb, var(--debris) 50%, transparent); }
 .pill.leak { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.clock { font: 500 11px/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* Controls */
-.row { display: flex; flex-wrap: wrap; gap: 8px; }
-button {
-  font: 500 var(--step-0)/1 var(--font-body); color: var(--ink); background: transparent;
-  border: 1px solid var(--rule); border-radius: 5px; padding: 9px 12px; cursor: pointer;
-}
-button:hover { border-color: var(--muted); }
-button.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
-button.primary:hover { opacity: 0.9; }
-button:disabled { opacity: 0.45; cursor: default; }
-button:focus-visible, input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
-.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
-.seg button { border: 0; border-radius: 0; padding: 7px 10px; font-family: var(--font-mono); font-size: 12px; }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
-.toggles { display: grid; gap: 8px; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 5px 0 5px 6px; border-bottom: 1px solid var(--rule); }
+th:first-child, td:first-child { text-align: left; padding-left: 0; }
+thead th { font: 600 11px/1.2 var(--font-display); color: var(--muted); letter-spacing: 0.04em; }
+tbody td { font: 500 var(--step-0)/1.2 var(--font-mono); }
+tbody td:first-child { font: 400 var(--step-0)/1.25 var(--font-body); }
+tbody tr:last-child td { border-bottom: 0; }
+td.expect { color: var(--ink); }
+td.zero { color: var(--muted); opacity: 0.6; }
+td.stray { color: var(--warn); }
+.dot { display: inline-block; border-radius: 50%; margin-right: 3px; }
+.dot.d8 { background: var(--debris-8); width: 11px; height: 11px; vertical-align: -1px; }
+.dot.d7 { background: var(--debris-7); width: 10px; height: 10px; vertical-align: 0; }
+.dot.d6 { background: var(--debris); width: 9px; height: 9px; vertical-align: 0; }
+.dot.s { background: var(--violet); width: 6px; height: 6px; vertical-align: 1px; }
+
+.opts { display: grid; gap: 8px; }
 .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.switch span.track { width: 34px; height: 20px; border-radius: 999px; background: var(--rule); position: relative; flex: none; transition: background .15s; }
-.switch span.track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); transition: transform .15s; }
-.switch input:checked + span.track { background: var(--violet); }
-.switch input:checked + span.track::after { transform: translateX(14px); }
-.switch input:focus-visible + span.track { outline: 2px solid var(--focus); outline-offset: 2px; }
-.switch .txt small { display: block; color: var(--muted); font-size: 12px; }
-
-/* Scale-model mapping */
-dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 12px; }
-dt { font: 500 12px/1.35 var(--font-mono); white-space: nowrap; }
-dd { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
-
-footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
-@media (prefers-reduced-motion: reduce) { .switch span.track, .switch span.track::after { transition: none; } }
+.switch .track { width: 34px; height: 20px; border-radius: 999px; background: var(--rule); position: relative; flex: none; transition: background .15s; }
+.switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); transition: transform .15s; }
+.switch input:checked + .track { background: var(--violet); }
+.switch input:checked + .track::after { transform: translateX(14px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .switch .track, .switch .track::after { transition: none; } }
 </style>
 
 <div class="wrap">
   <header>
-    <h1>Bead Filter Bench</h1>
-    <p>Two-stage separation in the printed filter body: 6–8&nbsp;mm beads stand in for lysed-cell debris of different sizes, 3&nbsp;mm beads for bacteria. Drag to orbit, scroll to zoom.</p>
+    <div class="title">
+      <h1>Bead Filter Bench</h1>
+      <span class="info">
+        <button type="button" aria-label="About this demo" aria-describedby="tip-about">i</button>
+        <div class="tip from-left" id="tip-about" role="tooltip"><div class="tip-body">
+          <p>A scaled-up, 3D-printable model of the AxisMED bacteria capture device. Two printed grids stand in for the device's filter layers, and glass beads stand in for what they catch.</p>
+          <dl>
+            <dt>4.5 mm slots</dt><dd>Layer 1 coarse debris filter, ~2–5 µm</dd>
+            <dt>2 mm slots</dt><dd>Layer 2 capture membrane, 0.22–0.4 µm</dd>
+            <dt>6–8 mm beads</dt><dd>Lysed blood-cell debris and aggregates of different sizes</dd>
+            <dt>3 mm beads</dt><dd>Bacteria, held on top of Layer 2 for Gram staining</dd>
+          </dl>
+          <h3>Using it</h3>
+          <ul>
+            <li>Drag the model to tilt and turn it. Gravity stays pointing down, so the beads roll the way the real device would.</li>
+            <li>A quick drag shakes it. Flipping it upside down sends beads back up toward the inlet, which is how you empty the real one.</li>
+            <li><b>Upright</b> turns it back. Scroll or pinch to zoom. <kbd>Space</kbd> pauses.</li>
+          </ul>
+          <h3>Model</h3>
+          <p>The filter body and clear panel are exported straight from the Onshape design, including the slide-in groove and the side snap bumps. Beads collide with every triangle of the body; the panel's inner face is the front wall.</p>
+          <p>Physics: glass beads in water, with buoyancy-reduced gravity, liquid drag and the forces of a device being turned by hand. Beads that stop moving rest in place until something disturbs them.</p>
+        </div></div>
+      </span>
+    </div>
+    <p class="hint">Drag to tilt and shake · scroll or pinch to zoom</p>
   </header>
 
   <div class="bench">
     <div class="stage" id="stage">
       <div class="load-msg" id="loadMsg">Loading the filter body…</div>
-      <div class="stage-note" id="stageNote">Filter body: STL from Onshape · clear cover 62 × 93 × 3 mm</div>
+      <div class="toolbar">
+        <div class="group">
+          <button class="primary" id="btnPause" type="button">Pause</button>
+          <button id="btnShake" type="button">Shake</button>
+          <button id="btnUpright" type="button">Upright</button>
+          <button id="btnReplay" type="button">Replay</button>
+        </div>
+        <div class="seg" role="group" aria-label="Playback speed">
+          <button type="button" data-speed="0.5" aria-pressed="false">0.5×</button>
+          <button type="button" data-speed="1" aria-pressed="true">1×</button>
+          <button type="button" data-speed="2" aria-pressed="false">2×</button>
+        </div>
+      </div>
     </div>
 
     <aside>
       <section class="block" aria-labelledby="runLbl">
-        <div class="label" id="runLbl">Run <span class="pill" id="clock">0.0 s</span></div>
+        <div class="label"><span id="runLbl">Run</span>
+          <span class="info">
+            <button type="button" aria-label="About the run steps" aria-describedby="tip-run">i</button>
+            <div class="tip" id="tip-run" role="tooltip"><div class="tip-body">
+              <ul>
+                <li><b>Load.</b> 7 and 8 mm beads start in the top chamber: they are too big for the 7 mm inlet, so they go in before the panel slides on. 6 mm and 3 mm beads arrive through the inlet in a rinse stream.</li>
+                <li><b>Settle.</b> Liquid drains through both grids. Some 3 mm beads get trapped on top of the debris.</li>
+                <li><b>Agitate.</b> Up to five shakes knock the trapped 3 mm beads through the coarse slots.</li>
+                <li><b>Result.</b> Debris above the coarse grid, bacteria beads on the fine grid, an empty reservoir.</li>
+              </ul>
+            </div></div>
+          </span>
+          <span class="end"><span class="clock" id="clock">0.0 s</span><span class="pill" id="verdict">Loading</span></span>
+        </div>
         <ol class="steps" id="steps">
           <li data-p="load">Load</li>
           <li data-p="settle">Settle</li>
           <li data-p="shake">Agitate</li>
           <li data-p="result">Result</li>
         </ol>
-        <p class="phase-line" id="phaseLine">Beads enter through the inlet in a rinse stream.</p>
       </section>
 
-      <section class="block" aria-labelledby="whereLbl">
-        <div class="label" id="whereLbl">Where the beads are <span class="pill" id="verdict">Running</span></div>
+      <section class="block" aria-labelledby="beadLbl">
+        <div class="label"><span id="beadLbl">Beads</span>
+          <span class="info">
+            <button type="button" aria-label="About the bead counts" aria-describedby="tip-beads">i</button>
+            <div class="tip" id="tip-beads" role="tooltip"><div class="tip-body">
+              <p>How many beads of each size are in each zone right now. Numbers in red are beads in the wrong place.</p>
+              <dl>
+                <dt>Top</dt><dd>Above the coarse grid. Debris (6–8 mm) belongs here.</dd>
+                <dt>Middle</dt><dd>Between the grids. 3 mm bacteria beads belong here.</dd>
+                <dt>Reservoir</dt><dd>Below the fine grid. Liquid only; any bead here leaked.</dd>
+                <dt>Feed tube</dt><dd>Above the inlet, waiting to drop in (or pushed back up by flipping the device).</dd>
+              </dl>
+            </div></div>
+          </span>
+        </div>
         <table>
           <thead><tr><th scope="col">Zone</th><th scope="col"><span class="dot d8"></span>8</th><th scope="col"><span class="dot d7"></span>7</th><th scope="col"><span class="dot d6"></span>6</th><th scope="col"><span class="dot s"></span>3 mm</th></tr></thead>
           <tbody>
-            <tr><td>Top chamber<small>held by coarse grid</small></td><td id="c-top-0">0</td><td id="c-top-1">0</td><td id="c-top-2">0</td><td id="c-top-3">0</td></tr>
-            <tr><td>Middle chamber<small>held by fine grid</small></td><td id="c-mid-0">0</td><td id="c-mid-1">0</td><td id="c-mid-2">0</td><td id="c-mid-3">0</td></tr>
-            <tr><td>Reservoir<small>liquid only</small></td><td id="c-res-0">0</td><td id="c-res-1">0</td><td id="c-res-2">0</td><td id="c-res-3">0</td></tr>
-            <tr><td>In feed line<small>not yet entered</small></td><td id="c-feed-0">0</td><td id="c-feed-1">0</td><td id="c-feed-2">0</td><td id="c-feed-3">0</td></tr>
+            <tr><td>Top</td><td id="c-top-0">0</td><td id="c-top-1">0</td><td id="c-top-2">0</td><td id="c-top-3">0</td></tr>
+            <tr><td>Middle</td><td id="c-mid-0">0</td><td id="c-mid-1">0</td><td id="c-mid-2">0</td><td id="c-mid-3">0</td></tr>
+            <tr><td>Reservoir</td><td id="c-res-0">0</td><td id="c-res-1">0</td><td id="c-res-2">0</td><td id="c-res-3">0</td></tr>
+            <tr><td>Feed tube</td><td id="c-feed-0">0</td><td id="c-feed-1">0</td><td id="c-feed-2">0</td><td id="c-feed-3">0</td></tr>
           </tbody>
         </table>
       </section>
 
-      <section class="block" aria-labelledby="ctlLbl">
-        <div class="label" id="ctlLbl">Controls</div>
-        <div class="row">
-          <button class="primary" id="btnReplay" type="button">Replay demo</button>
-          <button id="btnShake" type="button">Shake 2.5 s</button>
-          <button id="btnAdd" type="button" title="Adds 6 mm and 3 mm beads through the inlet">Add beads</button>
+      <section class="block" aria-labelledby="optLbl">
+        <div class="label"><span id="optLbl">Options</span>
+          <span class="info">
+            <button type="button" aria-label="About the options" aria-describedby="tip-opts">i</button>
+            <div class="tip" id="tip-opts" role="tooltip"><div class="tip-body">
+              <ul>
+                <li><b>Add beads</b> drops six more 6 mm and eighteen more 3 mm beads through the inlet.</li>
+                <li><b>Rinse flow</b> runs liquid through the device toward the outlet, which carries small beads down through gaps.</li>
+                <li><b>Clear panel</b> hides the acrylic panel so you can see the grates directly. The beads are still held in.</li>
+              </ul>
+            </div></div>
+          </span>
         </div>
-        <div class="toggles">
-          <label class="switch"><span class="txt">Rinse flow<small>liquid pushes beads downward</small></span><input type="checkbox" id="tgRinse" checked><span class="track"></span></label>
-          <label class="switch"><span class="txt">Clear cover<small>hide to see the grates directly</small></span><input type="checkbox" id="tgCover" checked><span class="track"></span></label>
+        <div class="opts">
+          <button id="btnAdd" type="button">Add beads</button>
+          <label class="switch"><span>Rinse flow</span><input type="checkbox" id="tgRinse" checked><span class="track"></span></label>
+          <label class="switch"><span>Clear panel</span><input type="checkbox" id="tgCover" checked><span class="track"></span></label>
         </div>
-        <div class="row" style="align-items:center; justify-content:space-between">
-          <span class="label" style="display:inline">Speed</span>
-          <div class="seg" role="group" aria-label="Playback speed">
-            <button type="button" data-speed="0.5" aria-pressed="false">0.5×</button>
-            <button type="button" data-speed="1" aria-pressed="true">1×</button>
-            <button type="button" data-speed="2" aria-pressed="false">2×</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="block" aria-labelledby="mapLbl">
-        <div class="label" id="mapLbl">Demo ↔ device</div>
-        <dl>
-          <dt>4.5 mm slots</dt><dd>Layer 1 coarse debris filter, ~2–5 µm</dd>
-          <dt>2 mm slots</dt><dd>Layer 2 capture membrane, 0.22–0.4 µm</dd>
-          <dt><span class="dot d8"></span><span class="dot d7"></span><span class="dot d6"></span>6–8 mm</dt><dd>Lysed RBC/WBC debris and aggregates of different sizes</dd>
-          <dt><span class="dot s"></span>3 mm bead</dt><dd>Bacteria, retained on top of Layer 2 for Gram staining</dd>
-          <dt>Reservoir</dt><dd>Waste liquid; should stay bead-free</dd>
-        </dl>
       </section>
     </aside>
   </div>
-
-  <footer>Physics: glass beads in water (buoyancy-reduced gravity, linear drag), collisions solved against every triangle of the exported filter body. Your CAD has the cover suppressed, so it is modelled here as a flat wall on the front face. The feed line above the inlet stands in for the suppressed nipple.</footer>
 </div>
 
 <script>
 /*SIM_CORE*/
 </script>
-<script>window.STL_B64 = "__STL_B64__";</script>
+<script>window.STL_B64 = "__STL_B64__"; window.PANEL_B64 = "__PANEL_B64__";</script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -233,34 +299,38 @@ footer { color: var(--muted); font-size: 12px; max-width: 90ch; }
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-const { Sim, DEV } = window.BeadSim;
+const { Sim, DEV, parseSTL } = window.BeadSim;
 const N6 = 10, N_SMALL = 45;
 const MAX_SHAKES = 5;
-const PRELOAD = { 8: 4, 7: 5 };  // too big for the 7 mm inlet: placed before the cover goes on
+const PRELOAD = { 8: 4, 7: 5 };  // too big for the 7 mm inlet: placed before the panel slides on
+const CENTER = new THREE.Vector3(0, -9.25, 50);  // pivot the device turns about (mm)
 
-// ---------- geometry
-const bin = Uint8Array.from(atob(window.STL_B64), (c) => c.charCodeAt(0)).buffer;
-const sim = new Sim(bin);
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer;
+const sim = new Sim(b64(window.STL_B64));
+sim.pivot = [CENTER.x, CENTER.y, CENTER.z];
 
 const stage = document.getElementById("stage");
-const css = () => getComputedStyle(document.documentElement);
-const tok = (n) => css().getPropertyValue(n).trim();
+const tok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const $ = (id) => document.getElementById(id);
 
+// ---------- scene
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 stage.prepend(renderer.domElement);
-document.getElementById("loadMsg").remove();
+$("loadMsg").remove();
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(28, 1, 1, 3000);
 camera.up.set(0, 0, 1);
-const target = new THREE.Vector3(0, -8, 54);
-camera.position.set(105, -265, 128);
+camera.position.set(105, -275, 132);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.copy(target);
+controls.target.copy(CENTER);
+controls.enableRotate = false;   // dragging turns the device itself, not the camera
+controls.enablePan = false;
 controls.enableDamping = true;
 controls.minDistance = 90;
 controls.maxDistance = 600;
+controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_PAN };
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8a9696, 1.6));
 const key = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -270,55 +340,58 @@ const rim = new THREE.DirectionalLight(0xffffff, 0.5);
 rim.position.set(120, 80, 60);
 scene.add(rim);
 
+// pivot (rotation) > device (shake offset) > meshes in device coordinates
+const pivot = new THREE.Group();
+pivot.position.copy(CENTER);
+scene.add(pivot);
 const device = new THREE.Group();
-scene.add(device);
+pivot.add(device);
 
-// Printed body from the STL
-const tri = sim.tri;
-const g = new THREE.BufferGeometry();
-g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(tri), 3));
-g.computeVertexNormals();
-const body = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xe6e9e4, roughness: 0.85, metalness: 0, flatShading: true }));
-device.add(body);
+const geomFrom = (tri) => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(tri), 3));
+  g.computeVertexNormals();
+  return g;
+};
 const edgeMat = new THREE.LineBasicMaterial({ color: 0x334040, transparent: true, opacity: 0.35 });
-device.add(new THREE.LineSegments(new THREE.EdgesGeometry(g, 25), edgeMat));
+const bodyGeo = geomFrom(sim.tri);
+device.add(new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0xe6e9e4, roughness: 0.85, flatShading: true })));
+device.add(new THREE.LineSegments(new THREE.EdgesGeometry(bodyGeo, 25), edgeMat));
 
-// Clear cover (suppressed in CAD; same footprint as the body)
-const cover = new THREE.Group();
-const coverGeo = new THREE.BoxGeometry(62, 3, 93);
-const coverMesh = new THREE.Mesh(coverGeo, new THREE.MeshPhysicalMaterial({
-  color: 0xcfe7f3, transparent: true, opacity: 0.14, roughness: 0.05, depthWrite: false,
-}));
-cover.add(coverMesh);
-cover.add(new THREE.LineSegments(new THREE.EdgesGeometry(coverGeo), new THREE.LineBasicMaterial({ color: 0x5e8aa0, transparent: true, opacity: 0.6 })));
-cover.position.set(0, -14.5, 46.5);
-device.add(cover);
+const panelGeo = geomFrom(parseSTL(b64(window.PANEL_B64)));
+const panel = new THREE.Group();
+panel.add(new THREE.Mesh(panelGeo, new THREE.MeshPhysicalMaterial({
+  color: 0xcfe7f3, transparent: true, opacity: 0.16, roughness: 0.05, depthWrite: false,
+})));
+panel.add(new THREE.LineSegments(new THREE.EdgesGeometry(panelGeo, 25),
+  new THREE.LineBasicMaterial({ color: 0x5e8aa0, transparent: true, opacity: 0.55 })));
+device.add(panel);
 
-// Feed line standing in for the suppressed inlet nipple
-const tubeGeo = new THREE.CylinderGeometry(5, 5, 20, 32, 1, true);
-const tube = new THREE.Mesh(tubeGeo, new THREE.MeshPhysicalMaterial({ color: 0xcfe7f3, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
+// Feed tube standing in for the suppressed inlet nipple
+const FEED_LEN = 22;
+const tube = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, FEED_LEN, 32, 1, true),
+  new THREE.MeshPhysicalMaterial({ color: 0xcfe7f3, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }));
 tube.rotation.x = Math.PI / 2;
-tube.position.set(DEV.inlet.x, DEV.inlet.y, DEV.top + 10);
+tube.position.set(DEV.inlet.x, DEV.inlet.y, DEV.top + FEED_LEN / 2);
 device.add(tube);
 
-// Liquid volume inside the cavity, shown while rinsing
+// Liquid in the cavity while rinsing
 const liquid = new THREE.Mesh(new THREE.BoxGeometry(49.8, 9.8, 80.8),
   new THREE.MeshBasicMaterial({ color: 0x7fb6d6, transparent: true, opacity: 0.07, depthWrite: false }));
 liquid.position.set(0, -8, 46.5);
 device.add(liquid);
 
-// Beads
+// Beads, drawn in world space
 const sphere = new THREE.SphereGeometry(1, 22, 16);
 const largeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35, metalness: 0.05 });
-const debrisColors = { 8: new THREE.Color(), 7: new THREE.Color(), 6: new THREE.Color() };
 const smallMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05 });
-const MAXL = 120, MAXS = 360;
+const debrisColors = { 8: new THREE.Color(), 7: new THREE.Color(), 6: new THREE.Color() };
+const MAXL = 160, MAXS = 400;
 const largeIM = new THREE.InstancedMesh(sphere, largeMat, MAXL);
 const smallIM = new THREE.InstancedMesh(sphere, smallMat, MAXS);
 largeIM.count = 0; smallIM.count = 0;
 scene.add(largeIM, smallIM);
 
-// ---------- labels projected from the device
 const tags = [
   { z: 75, html: "<b>Top chamber</b>" },
   { z: 55.5, html: "Coarse grid · <b>4.5 mm</b>" },
@@ -346,30 +419,61 @@ function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  // Narrow stages need a longer lens distance to keep the device and labels in frame.
   camera.fov = w / h < 0.8 ? 38 : 28;
   camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(stage);
 resize();
 
+// ---------- turning the device by hand
+const q = new THREE.Quaternion();          // device -> world
+const qPrev = new THREE.Quaternion();
+const omegaW = new THREE.Vector3();        // smoothed angular velocity, world frame (rad/s)
+const omegaLocalPrev = new THREE.Vector3();
+let uprightAnim = null;
+let drag = null;
+const canvas = renderer.domElement;
+const tmpQ = new THREE.Quaternion(), tmpV = new THREE.Vector3(), right = new THREE.Vector3();
+
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || (e.pointerType === "touch" && drag)) { drag = null; return; }
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add("dragging");
+  uprightAnim = null;
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  const k = 0.009;
+  right.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  tmpQ.setFromAxisAngle(tmpV.set(0, 0, 1), dx * k);
+  q.premultiply(tmpQ);
+  tmpQ.setFromAxisAngle(right, dy * k);
+  q.premultiply(tmpQ).normalize();
+});
+const endDrag = (e) => { if (drag && e.pointerId === drag.id) { drag = null; canvas.classList.remove("dragging"); } };
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+
+function stand(upright) {
+  uprightAnim = upright ? { from: q.clone(), t: 0 } : null;
+}
+
 // ---------- run director
-let speed = 1;
-const run = { phase: "load", t0: 0, shakesLeft: 0, nextAt: 0 };
-const PHASE_TEXT = {
-  load: "7 and 8 mm beads start in the top chamber (too big for the 7 mm inlet). 6 mm and 3 mm beads arrive through the inlet in a rinse stream.",
-  settle: "Liquid drains through both grids. Some 3 mm beads are still trapped on top of the 6 mm layer.",
-  shake: "Agitating the device knocks trapped 3 mm beads through the coarse slots.",
-  result: "Separated: debris beads held above the coarse grid, bacteria beads on the fine grid.",
-};
+let speed = 1, paused = false;
+const run = { phase: "load", shakesLeft: 0, nextAt: 0 };
 
 function startDemo() {
   sim.reset();
   sim.t = 0;
+  q.identity(); qPrev.identity(); omegaW.set(0, 0, 0); omegaLocalPrev.set(0, 0, 0); uprightAnim = null;
+  sim.setFrame([0, 0, -1], [0, 0, 0], [0, 0, 0]);
   const seed = 1 + Math.floor(Math.random() * 1e6);
   sim.preload(PRELOAD, seed);
   sim.pour(N6, N_SMALL, seed);
-  sim.rinse(document.getElementById("tgRinse").checked);
+  sim.rinse($("tgRinse").checked);
   Object.assign(run, { phase: "load", shakesLeft: MAX_SHAKES, nextAt: 0 });
 }
 
@@ -386,7 +490,7 @@ function director() {
 }
 
 // ---------- read-out
-const $ = (id) => document.getElementById(id);
+const sum = (a) => a.reduce((x, y) => x + y, 0);
 function readout() {
   const c = sim.census();
   const want = { top: [0, 1, 2], mid: [3] };
@@ -397,60 +501,122 @@ function readout() {
       el.className = v === 0 ? "zero" : (want[zone] || []).includes(k) || zone === "feed" ? "expect" : "stray";
     }
   }
-  const total = sim.beads.length + sim.pending;
-  const sum = (a) => a.reduce((x, y) => x + y, 0);
   const leaked = sum(c.res) + sum(c.lost);
   const v = $("verdict");
-  if (leaked) { v.textContent = `${leaked} leaked`; v.className = "pill leak"; }
-  else if (total && c.top[3] === 0 && c.mid[0] + c.mid[1] + c.mid[2] === 0 && sum(c.feed) === 0 && sim.pending === 0 && run.phase !== "load") { v.textContent = "Separated"; v.className = "pill ok"; }
-  else if (total) { v.textContent = c.top[3] ? `${c.top[3]} small trapped` : "Running"; v.className = "pill mixed"; }
-  else { v.textContent = "Empty"; v.className = "pill"; }
+  const set = (text, cls) => { v.textContent = text; v.className = "pill " + cls; };
+  if (paused) set("Paused", "");
+  else if (leaked) set(`${leaked} leaked`, "leak");
+  else if (sim.shaking) set("Shaking", "mixed");
+  else if (run.phase === "load") set("Loading", "");
+  else if (c.top[3] === 0 && c.mid[0] + c.mid[1] + c.mid[2] === 0 && sum(c.feed) === 0 && sim.pending === 0) set("Separated", "ok");
+  else if (run.phase === "result" && c.top[3]) set(`${c.top[3]} stuck · shake`, "mixed");
+  else set("Settling", "mixed");
 
   const order = ["load", "settle", "shake", "result"], i = order.indexOf(run.phase);
   for (const li of $("steps").children) {
     const j = order.indexOf(li.dataset.p);
     li.className = j < i ? "done" : j === i ? "now" : "";
   }
-  $("phaseLine").textContent = sim.shaking ? "Shaking: side-to-side, front-to-back and vertical taps."
-    : run.phase === "result" && c.top[3] ? `${c.top[3]} small bead${c.top[3] > 1 ? "s are" : " is"} still wedged among the debris. Press Shake to free ${c.top[3] > 1 ? "them" : "it"}.`
-    : PHASE_TEXT[run.phase];
   $("clock").textContent = `${sim.t.toFixed(1)} s`;
   $("btnShake").disabled = sim.shaking;
 }
 
 // ---------- controls
-$("btnReplay").addEventListener("click", startDemo);
-$("btnShake").addEventListener("click", () => { sim.shake(2.5); if (run.phase !== "load") run.phase = "shake", run.nextAt = sim.t + 4, run.shakesLeft = 0; });
+function togglePause() {
+  paused = !paused;
+  $("btnPause").textContent = paused ? "Resume" : "Pause";
+  readout();
+}
+$("btnPause").addEventListener("click", togglePause);
+addEventListener("keydown", (e) => {
+  if (e.code === "Space" && !e.repeat && !/INPUT|BUTTON|TEXTAREA/.test(document.activeElement?.tagName || "")) {
+    e.preventDefault(); togglePause();
+  }
+});
+$("btnReplay").addEventListener("click", () => { startDemo(); if (paused) togglePause(); });
+$("btnShake").addEventListener("click", () => {
+  sim.shake(2.5);
+  if (run.phase !== "load") Object.assign(run, { phase: "shake", nextAt: sim.t + 4, shakesLeft: 0 });
+});
+$("btnUpright").addEventListener("click", () => stand(true));
 $("btnAdd").addEventListener("click", () => {
   sim.pour(6, 18, 1 + Math.floor(Math.random() * 1e6));
-  run.phase = "load"; run.shakesLeft = MAX_SHAKES;
+  Object.assign(run, { phase: "load", shakesLeft: MAX_SHAKES });
 });
 $("tgRinse").addEventListener("change", (e) => sim.rinse(e.target.checked));
-$("tgCover").addEventListener("change", (e) => { cover.visible = e.target.checked; });
+$("tgCover").addEventListener("change", (e) => { panel.visible = e.target.checked; });
 for (const b of document.querySelectorAll(".seg button")) {
   b.addEventListener("click", () => {
     speed = +b.dataset.speed;
     for (const o of document.querySelectorAll(".seg button")) o.setAttribute("aria-pressed", String(o === b));
   });
 }
+// Tooltips: hover/focus opens them; a tap toggles them on touch screens.
+for (const info of document.querySelectorAll(".info")) {
+  info.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); info.classList.toggle("open"); });
+}
+document.addEventListener("click", (e) => {
+  for (const info of document.querySelectorAll(".info.open")) if (!info.contains(e.target)) info.classList.remove("open");
+});
 
 // ---------- loop
-const m4 = new THREE.Matrix4(), tmp = new THREE.Vector3();
+const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), qInv = new THREE.Quaternion();
+const gLocal = new THREE.Vector3(), wLocal = new THREE.Vector3(), aLocal = new THREE.Vector3();
 let frame = 0, acc = 0, last = performance.now();
+
+function updateFrame(real) {
+  if (uprightAnim) {
+    uprightAnim.t = Math.min(1, uprightAnim.t + real / 0.7);
+    const e = 1 - (1 - uprightAnim.t) ** 3;
+    q.slerpQuaternions(uprightAnim.from, tmpQ.identity(), e);
+    if (uprightAnim.t >= 1) uprightAnim = null;
+  }
+  // Angular velocity from this frame's change in orientation (world frame), smoothed.
+  tmpQ.copy(q).multiply(qPrev.clone().invert());
+  if (tmpQ.w < 0) tmpQ.set(-tmpQ.x, -tmpQ.y, -tmpQ.z, -tmpQ.w);
+  const ang = 2 * Math.acos(Math.min(1, tmpQ.w));
+  const s = Math.sqrt(Math.max(1e-12, 1 - tmpQ.w * tmpQ.w));
+  tmpV.set(tmpQ.x / s, tmpQ.y / s, tmpQ.z / s).multiplyScalar(real > 0 ? ang / real : 0);
+  omegaW.lerp(tmpV, 0.5);
+  if (omegaW.length() > 25) omegaW.setLength(25);
+  qPrev.copy(q);
+}
+
+function sendFrame(real) {
+  // Everything the physics needs, in device coordinates and simulation time.
+  qInv.copy(q).invert();
+  gLocal.set(0, 0, -1).applyQuaternion(qInv);
+  wLocal.copy(omegaW).applyQuaternion(qInv).divideScalar(speed);
+  aLocal.copy(wLocal).sub(omegaLocalPrev).divideScalar(Math.max(real * speed, 1e-3));
+  if (aLocal.length() > 400) aLocal.setLength(400);
+  omegaLocalPrev.copy(wLocal);
+  const tiny = wLocal.length() < 0.05;
+  sim.setFrame(gLocal.toArray(), tiny ? [0, 0, 0] : wLocal.toArray(), tiny ? [0, 0, 0] : aLocal.toArray());
+  const spin = omegaW.length();
+  if (spin > 1.2) sim.agitate((spin - 1.2) / 5);
+}
+
 function tick(now) {
   requestAnimationFrame(tick);
   const real = Math.min((now - last) / 1000, 0.05);
   last = now;
-  acc += real * speed;
-  let steps = 0;
-  while (acc >= 1 / 60 && steps < 4) { sim.step(1 / 60); acc -= 1 / 60; steps++; director(); }
-  if (steps === 4) acc = 0;
+  updateFrame(real);
 
-  device.position.set(sim.offset[0], sim.offset[1], sim.offset[2]);
+  if (!paused) {
+    sendFrame(real);
+    acc += real * speed;
+    let steps = 0;
+    while (acc >= 1 / 60 && steps < 4) { sim.step(1 / 60); acc -= 1 / 60; steps++; director(); }
+    if (steps === 4) acc = 0;
+  }
+
+  pivot.quaternion.copy(q);
+  device.position.set(sim.offset[0] - CENTER.x, sim.offset[1] - CENTER.y, sim.offset[2] - CENTER.z);
   liquid.visible = sim.rinsing;
   let nl = 0, ns = 0;
   for (const b of sim.beads) {
-    m4.makeScale(b.r, b.r, b.r).setPosition(b.x, b.y, b.z);
+    pos.set(b.x, b.y, b.z).sub(CENTER).applyQuaternion(q).add(CENTER);
+    m4.makeScale(b.r, b.r, b.r).setPosition(pos);
     if (b.r > 2) { if (nl < MAXL) { largeIM.setColorAt(nl, debrisColors[Math.round(2 * b.r)]); largeIM.setMatrixAt(nl++, m4); } }
     else if (ns < MAXS) smallIM.setMatrixAt(ns++, m4);
   }
@@ -461,10 +627,15 @@ function tick(now) {
   controls.update();
   renderer.render(scene, camera);
 
+  // Chamber labels ride along while the device is near upright, then fade out. Narrow
+  // stages skip them: they would run off the edge, and the bead table says the same.
+  const tilt = 2 * Math.acos(Math.min(1, Math.abs(q.w)));
   const w = stage.clientWidth, h = stage.clientHeight;
+  const labelsOn = w >= 560 ? 1 : 0;
   for (const t of tags) {
-    tmp.copy(t.v).project(camera);
-    t.el.style.transform = `translate(${((tmp.x + 1) / 2) * w}px, ${((1 - tmp.y) / 2) * h}px) translateY(-50%)`;
+    pos.copy(t.v).sub(CENTER).applyQuaternion(q).add(CENTER).project(camera);
+    t.el.style.transform = `translate(${((pos.x + 1) / 2) * w}px, ${((1 - pos.y) / 2) * h}px) translateY(-50%)`;
+    t.el.style.opacity = labelsOn * (tilt < 0.35 ? 1 : Math.max(0, 1 - (tilt - 0.35) / 0.25));
   }
   if (++frame % 6 === 0) readout();
 }
